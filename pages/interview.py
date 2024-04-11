@@ -7,8 +7,33 @@ import cv2
 import numpy as np
 from keras.models import load_model
 import asyncio
+from difflib import SequenceMatcher  # Import SequenceMatcher for string similarity comparison
+import comtypes.client
 
-api_data = "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"
+def initialize_engine():
+    try:
+        # Initialize COM library
+        comtypes.client.CoInitialize()
+        # Initialize pyttsx3 engine
+        engine = pyttsx3.init('sapi5')
+        voices = engine.getProperty('voices')
+        engine.setProperty('voice', voices[0].id)
+        return engine
+    except Exception as e:
+        print("Error initializing pyttsx3 engine:", e)
+        return None
+
+def uninitialize_engine(engine):
+    try:
+        # Uninitialize COM library
+        comtypes.client.CoUninitialize()
+    except Exception as e:
+        print("Error uninitializing COM library:", e)
+
+# Initialize engine
+engine = initialize_engine()
+
+api_data = "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"
 openai.api_key = api_data
 
 completion = openai.Completion()
@@ -28,49 +53,66 @@ def speak(text):
     else:
         engine.say(text)
 
-async def interview(name):
-    st.write(f"Starting the interview, Welcome {name}...")
-    speak(f"Starting the interview, Welcome {name}...")
-    questions = get_technical_questions()
-    chat_history = []
-    total_score = 0
-    total_questions = len(questions)
-    attended_questions = 0
-    for question in questions:
-        st.markdown(f'<div style="padding: 5px; background-color: #e0e0e0; text-align: left; margin-left: 0; margin-right: auto;"><strong>Bot:</strong> {question}</div>', unsafe_allow_html=True)
-        speak(question)
-        query = await takeCommand()
-        ans, score, chat_history, total_score = await Reply(query, chat_history, total_score)
-        attended_questions += 1
+def Reply(question, chat_history=None, total_score=0):
+    if chat_history is None:
+        chat_history = []
+    prompt = ''
+    for chat in chat_history:
+        prompt += f'User: {chat["user"]}\n Bot: {chat["bot"]}\n'
+    prompt += f'User: {question}\n Bot: '
+    response = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": "I am a Virtual Interview Preparation Coach."},
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=200,
+        temperature=0.7
+    )
+    answer = response['choices'][0]['message']['content'].strip()
+    
+    # Calculate score based on sentiment analysis
+    score = calculate_score(answer)
+    
+    # Update total score
+    total_score += score
+    
+    return answer, score, chat_history + [{"user": question, "bot": answer}], total_score
 
-        if query == 'none':
-            pass
-        elif query == "don't know" or score < 0:
-            total_score -= 1
-        else:
-            total_score += score
-        
-        speak(ans)
-        
-        if "thank you" in query:
-            break
+# def calculate_score(answer):
+#     # Perform sentiment analysis on the answer
+#     blob = TextBlob(answer)
+#     sentiment_score = blob.sentiment.polarity
 
-    st.title(f"Total Score: {total_score}/{attended_questions}")
-    st.write(f"Out of {total_questions} questions attended.")
+#     # Assign score based on sentiment
+#     if sentiment_score > 0.5:
+#         score = 2  # Excellent
+#     elif sentiment_score > 0:
+#         score = 1  # Good
+#     elif sentiment_score == 0:
+#         score = 0  # Neutral
+#     elif sentiment_score < -0.5:
+#         score = -2  # Very Poor
+#     else:
+#         score = -1  # Poor
+    
+#     return score
 
-def get_technical_questions():
-    # Define the path to the text file containing technical interview questions
-    file_path = r'E:/Major project/HOME/interview_questions.txt'
+def takeCommand():
+    r = sr.Recognizer()
+    with sr.Microphone() as source:
+        #st.sidebar.write("Listening....")
+        r.pause_threshold = 1
+        audio = r.listen(source)
     try:
-        with open(file_path, 'r') as file:
-            questions = file.readlines()
-        return [question.strip() for question in questions]
-    except FileNotFoundError:
-        st.write(f"Failed to open file: {file_path}. File not found.")
-        return []
+        #st.sidebar.write("Recognizing.....")
+        query = r.recognize_google(audio, language='en-in')
+        st.write('<div style="padding: 5px; background-color: #f0f0f0; text-align: right; margin-left: auto; margin-right: 0;">User: {}</div>'.format(query), unsafe_allow_html=True)
+
     except Exception as e:
-        st.write(f"Error occurred while opening file: {file_path}. {e}")
-        return []
+        #st.sidebar.write("Say That Again....")
+        return "None"
+    return query
 
 def detect_emotion(face):
     # Convert the input image to grayscale
@@ -94,18 +136,120 @@ def detect_emotion(face):
 
     return dominant_emotion
 
-async def takeCommand():
-    r = sr.Recognizer()
-    with sr.Microphone() as source:
-        r.pause_threshold = 1
-        audio = r.listen(source)
+def load_expected_answers():
+    dataset_path = "E:/Major project/HOME/pages/expected_answers.txt"
     try:
-        query = r.recognize_google(audio, language='en-in')
-        st.write('<div style="padding: 5px; background-color: #f0f0f0; text-align: right; margin-left: auto; margin-right: 0;">User: {}</div>'.format(query), unsafe_allow_html=True)
-
+        with open(dataset_path, 'r') as file:
+            expected_answers = file.readlines()
+        return [answer.strip() for answer in expected_answers]
+    except FileNotFoundError:
+        st.write(f"Failed to open file: {dataset_path}. File not found.")
+        return []
     except Exception as e:
-        return "None"
-    return query
+        st.write(f"Error occurred while opening file: {dataset_path}. {e}")
+        return []
+    
+def review_answer(user_answer, expected_answers, attended_questions):
+    max_similarity = 0
+    best_match = "No review available"
+    
+    # Find the index of the current question in the list of expected answers
+    index = attended_questions - 1
+    
+    if index >= 0 and index < len(expected_answers):
+        expected_answer = expected_answers[index]
+        similarity = calculate_similarity(user_answer, expected_answer)
+        best_match = expected_answer
+        max_similarity = similarity
+
+    return best_match, max_similarity
+
+def calculate_similarity(answer1, answer2):
+    # Convert answers to lowercase for case-insensitive comparison
+    answer1 = answer1.lower()
+    answer2 = answer2.lower()
+
+    # Calculate Levenshtein distance
+    m = len(answer1)
+    n = len(answer2)
+    dp = [[0] * (n + 1) for _ in range(m + 1)]
+    
+    for i in range(m + 1):
+        for j in range(n + 1):
+            if i == 0:
+                dp[i][j] = j
+            elif j == 0:
+                dp[i][j] = i
+            elif answer1[i - 1] == answer2[j - 1]:
+                dp[i][j] = dp[i - 1][j - 1]
+            else:
+                dp[i][j] = 1 + min(dp[i][j - 1],      # Insertion
+                                   dp[i - 1][j],      # Deletion
+                                   dp[i - 1][j - 1])  # Substitution
+    
+    # Calculate similarity score (inverse of Levenshtein distance normalized by length)
+    similarity_score = 1 - (dp[m][n] / max(m, n))
+    return similarity_score
+
+async def start_interview():
+    st.write("Starting the interview...")
+    speak("Starting the interview...")
+    questions = get_technical_questions()
+    chat_history = []
+    total_score = 0
+    total_questions = len(questions)
+    attended_questions = 0
+    
+    # Load the dataset containing expected answers
+    expected_answers = load_expected_answers()
+    
+    # Define threshold similarity score
+    threshold_similarity = 0.7
+    
+    for question in questions:
+        st.markdown(f'<div style="padding: 5px; background-color: #e0e0e0; text-align: left; margin-left: 0; margin-right: auto;"><strong>Bot:</strong> {question}</div>', unsafe_allow_html=True)
+        speak(question)
+        
+        # Get user's answer
+        query = takeCommand().lower()
+        user_answer = query
+        
+        # Review user's answer against dataset
+        review, similarity = review_answer(user_answer, expected_answers, attended_questions)
+        st.write(f"Review: {review}, Similarity: {similarity}")
+        
+        # Update total score based on the review
+        if similarity >= threshold_similarity:
+            total_score += 1  # Assign a positive score if similarity is above the threshold
+        else:
+            total_score -= 1  # Assign a negative score if similarity is below the threshold
+        
+        # Display the updated score
+        st.write(f"Total Score: {total_score}/{attended_questions}")
+        
+        attended_questions += 1
+        
+        # Check if user says "thank you" to end the chat
+        if "thank you" in query:
+            break
+
+    # Display total score in big font at the end
+    st.title(f"Total Score: {total_score}/{attended_questions}")
+    st.write(f"Out of {total_questions} questions attended.")
+
+def get_technical_questions():
+    # Define the path to the text file containing technical interview questions
+    file_path = r'E:/Major project/HOME/interview_questions.txt'
+    try:
+        with open(file_path, 'r') as file:
+            questions = file.readlines()
+        return [question.strip() for question in questions]
+    except FileNotFoundError:
+        st.write(f"Failed to open file: {file_path}. File not found.")
+        return []
+    except Exception as e:
+        st.write(f"Error occurred while opening file: {file_path}. {e}")
+        return []
 
 async def camera_feed():
     # Display the camera feed in the sidebar
@@ -149,58 +293,11 @@ async def camera_feed():
     video_capture.release()
     cv2.destroyAllWindows()
 
-async def Reply(question, chat_history=None, total_score=0):
-    if chat_history is None:
-        chat_history = []
-    prompt = ''
-    for chat in chat_history:
-        prompt += f'User: {chat["user"]}\n Bot: {chat["bot"]}\n'
-    prompt += f'User: {question}\n Bot: '
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": "I am a Virtual Interview Preparation Coach."},
-            {"role": "user", "content": prompt}
-        ],
-        max_tokens=200,
-        temperature=0.7
-    )
-    answer = response['choices'][0]['message']['content'].strip()
-    
-    # Calculate score based on sentiment analysis
-    score = calculate_score(answer)
-    
-    # Update total score
-    total_score += score
-    
-    return answer, score, chat_history + [{"user": question, "bot": answer}], total_score
-
-def calculate_score(answer):
-    # Perform sentiment analysis on the answer
-    blob = TextBlob(answer)
-    sentiment_score = blob.sentiment.polarity
-
-    # Assign score based on sentiment
-    if sentiment_score > 0.5:
-        score = 2  # Excellent
-    elif sentiment_score > 0:
-        score = 1  # Good
-    elif sentiment_score == 0:
-        score = 0  # Neutral
-    elif sentiment_score < -0.5:
-        score = -2  # Very Poor
-    else:
-        score = -1  # Poor
-    
-    return score
-
 async def main():
     st.title("Interview Preparation Coach")
-    name = st.text_input("Enter your name:")
     if st.button("Start Interview"):
-        # Start the interview and camera feed concurrently
-        
-        await asyncio.gather(interview(name), camera_feed())
-
+        # Run the interview and camera feed concurrently using asyncio.gather()
+        await asyncio.gather(start_interview(), camera_feed())
+uninitialize_engine(engine)
 if __name__ == '__main__':
     asyncio.run(main())
