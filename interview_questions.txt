@@ -1,0 +1,6 @@
+Define Data Structures?	
+what do you mean by bestfirst search ?
+how do you explain a semaphore?
+What is the worst case complexity of binary search?
+define an acyclic graph.
+
