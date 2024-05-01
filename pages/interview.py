@@ -5,10 +5,23 @@ from textblob import TextBlob
 import openai
 import cv2
 import numpy as np
+import os
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
 from keras.models import load_model
 import asyncio
 from difflib import SequenceMatcher  # Import SequenceMatcher for string similarity comparison
 import comtypes.client
+
+emotion_scores = {
+    "Angry": 1,
+    "Disgust": 2,
+    "Fear": 3,
+    "Happy": 9,
+    "Sad": 5,
+    "Surprise": 8,
+    "Neutral": 7
+}
 
 def initialize_engine():
     try:
@@ -22,6 +35,25 @@ def initialize_engine():
     except Exception as e:
         print("Error initializing pyttsx3 engine:", e)
         return None
+    
+def generate_pdf(feedback):
+    # Get the directory path where the script is located
+    script_dir = os.path.dirname(__file__)
+    # Define the path to save the PDF
+    pdf_path = os.path.join(script_dir, "interview_feedback.pdf")
+    
+    # Create a PDF document
+    c = canvas.Canvas(pdf_path, pagesize=letter)
+    
+    # Add content to the PDF
+    c.setFont("Helvetica", 12)
+    c.drawString(100, 750, "Interview Feedback")
+    c.drawString(100, 730, "-" * 60)
+    c.drawString(100, 710, feedback)
+    
+    # Save the PDF
+    c.save()
+    return pdf_path
 
 def uninitialize_engine(engine):
     try:
@@ -33,7 +65,7 @@ def uninitialize_engine(engine):
 # Initialize engine
 engine = initialize_engine()
 
-api_data = "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"
+api_data = "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"
 openai.api_key = api_data
 
 completion = openai.Completion()
@@ -119,7 +151,7 @@ def detect_emotion(face):
     gray_face = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
 
     # Load pre-trained emotion detection model
-    emotion_model = load_model('E:/Major project/HOME/pages/model_file_30epochs.h5')
+    emotion_model = load_model(r'C:\Users\ASUS\Desktop\krishna\MAjor-Project\emoton.h5')
 
     # Resize and normalize the grayscale image for emotion detection
     face_resized = cv2.resize(gray_face, (48, 48))
@@ -134,10 +166,15 @@ def detect_emotion(face):
     emotions = ["Angry", "Disgust", "Fear", "Happy", "Sad", "Surprise", "Neutral"]
     dominant_emotion = emotions[dominant_emotion_idx]
 
+    # Assign a score based on the detected emotion
+    
+    emotion_score = emotion_scores.get(dominant_emotion, 0)  # Default score is 0 for unknown emotions
+    
+    return dominant_emotion, emotion_score
     return dominant_emotion
 
 def load_expected_answers():
-    dataset_path = "E:/Major project/HOME/pages/expected_answers.txt"
+    dataset_path = r'C:\Users\ASUS\Desktop\krishna\MAjor-Project\expected_answers.txt'
     try:
         with open(dataset_path, 'r') as file:
             expected_answers = file.readlines()
@@ -196,7 +233,7 @@ async def start_interview():
     speak("Starting the interview...")
     questions = get_technical_questions()
     chat_history = []
-    total_score = 0
+    total_score = 1
     total_questions = len(questions)
     attended_questions = 0
     
@@ -204,7 +241,8 @@ async def start_interview():
     expected_answers = load_expected_answers()
     
     # Define threshold similarity score
-    threshold_similarity = 0.7
+    t1 = 0.4
+    t2 =0.6
     
     for question in questions:
         st.markdown(f'<div style="padding: 5px; background-color: #e0e0e0; text-align: left; margin-left: 0; margin-right: auto;"><strong>Bot:</strong> {question}</div>', unsafe_allow_html=True)
@@ -219,27 +257,60 @@ async def start_interview():
         st.write(f"Review: {review}, Similarity: {similarity}")
         
         # Update total score based on the review
-        if similarity >= threshold_similarity:
-            total_score += 1  # Assign a positive score if similarity is above the threshold
+        if t1<=similarity < t2:
+            total_score += 1
+        elif similarity > t2:
+            total_score+=2
+            # Assign a positive score if similarity is above the threshold
         else:
             total_score -= 1  # Assign a negative score if similarity is below the threshold
         
         # Display the updated score
-        st.write(f"Total Score: {total_score}/{attended_questions}")
-        
+        st.write(f"Total Score: {total_score}")
+        st.write(f"Emotion score :{emotion_scores}")
         attended_questions += 1
         
         # Check if user says "thank you" to end the chat
         if "thank you" in query:
             break
-
+    total_score-2
     # Display total score in big font at the end
     st.title(f"Total Score: {total_score}/{attended_questions}")
     st.write(f"Out of {total_questions} questions attended.")
 
+    feedback = generate_feedback(total_score, total_questions)
+    st.write("Feedback from AI:", feedback)
+    
+    # Generate and download the PDF
+    pdf_path = generate_pdf(feedback)
+    st.markdown(f"### [Download Feedback as PDF]({pdf_path})", unsafe_allow_html=True)
+    
+    # Generate and download the PDF
+    
+    
+    # Ask for feedback
+    st.write("Please provide your feedback on the interview:")
+    user_feedback = st.text_area("Feedback")
+    st.write("Thank you for your feedback!")
+    
+    
+def generate_feedback(total_score, total_questions):
+    if total_questions == 0:
+        return "No questions were asked. Unable to provide feedback."
+    
+    percentage_score = (total_score / (total_questions * 10)) * 100
+    
+    if percentage_score >= 80:
+        return "You performed exceptionally well! Congratulations!"
+    elif percentage_score >= 60:
+        return "You performed above average. Keep up the good work!"
+    elif percentage_score >= 40:
+        return "Your performance was average. Try to improve in areas of weakness."
+    else:
+        return "Your performance was below expectations. Focus on improving your skills."
 def get_technical_questions():
     # Define the path to the text file containing technical interview questions
-    file_path = r'E:/Major project/HOME/interview_questions.txt'
+    file_path = r'C:\Users\ASUS\Desktop\krishna\MAjor-Project\interview_questions.txt'
     try:
         with open(file_path, 'r') as file:
             questions = file.readlines()
@@ -278,9 +349,9 @@ async def camera_feed():
         # Draw rectangles around the faces and display emotion
         for (x, y, w, h) in faces:
             face = frame_rgb[y:y+h, x:x+w]
-            emotion = detect_emotion(face)
+            emotion, _ = detect_emotion(face)  # Get emotion as string
             cv2.rectangle(frame, (x, y), (x+w, y+h), (255, 0, 0), 2)
-            cv2.putText(frame, emotion, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+            cv2.putText(frame, str(emotion), (x, y), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)  # Ensure emotion is converted to string
 
         # Display the frame in the sidebar
         video_feed.image(frame, channels="BGR")
@@ -292,6 +363,7 @@ async def camera_feed():
     # Release the camera and close OpenCV window
     video_capture.release()
     cv2.destroyAllWindows()
+
 
 async def main():
     st.title("Interview Preparation Coach")
