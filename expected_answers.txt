@@ -1,0 +1,3 @@
+Data Structures is defined as the way of organizing all data items that consider not only the elements stored but also stores the relationship between the elements.
+Soundex is a phonetic algorithm for indexing names by sound
+a simple diagram which does not have any cycles is called an acyclic graph
