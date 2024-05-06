@@ -40,7 +40,7 @@ def generate_pdf(feedback):
     # Get the directory path where the script is located
     script_dir = os.path.dirname(__file__)
     # Define the path to save the PDF
-    pdf_path = os.path.join(script_dir, "interview_feedback.pdf")
+    pdf_path = os.path.join(script_dir, r"C:\Users\rohit\OneDrive\Desktop\Krishna\krishna\MAjor-Project\pages\interview_feedback.pdf")
     
     # Create a PDF document
     c = canvas.Canvas(pdf_path, pagesize=letter)
@@ -151,7 +151,7 @@ def detect_emotion(face):
     gray_face = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
 
     # Load pre-trained emotion detection model
-    emotion_model = load_model(r'C:\Users\ASUS\Desktop\krishna\MAjor-Project\emoton.h5')
+    emotion_model = load_model(r'C:\Users\rohit\OneDrive\Desktop\Krishna\krishna\MAjor-Project\pages\model_file_30epochs.h5')
 
     # Resize and normalize the grayscale image for emotion detection
     face_resized = cv2.resize(gray_face, (48, 48))
@@ -174,7 +174,7 @@ def detect_emotion(face):
     return dominant_emotion
 
 def load_expected_answers():
-    dataset_path = r'C:\Users\ASUS\Desktop\krishna\MAjor-Project\expected_answers.txt'
+    dataset_path = r'C:\Users\rohit\OneDrive\Desktop\Krishna\krishna\MAjor-Project\pages\answers.txt'
     try:
         with open(dataset_path, 'r') as file:
             expected_answers = file.readlines()
@@ -245,45 +245,51 @@ async def start_interview():
     t2 =0.6
     
     for question in questions:
-        st.markdown(f'<div style="padding: 5px; background-color: #e0e0e0; text-align: left; margin-left: 0; margin-right: auto;"><strong>Bot:</strong> {question}</div>', unsafe_allow_html=True)
-        speak(question)
-        
-        # Get user's answer
-        query = takeCommand().lower()
-        user_answer = query
-        
-        # Review user's answer against dataset
-        review, similarity = review_answer(user_answer, expected_answers, attended_questions)
-        st.write(f"Review: {review}, Similarity: {similarity}")
-        
-        # Update total score based on the review
-        if t1<=similarity < t2:
-            total_score += 1
-        elif similarity > t2:
-            total_score+=2
-            # Assign a positive score if similarity is above the threshold
-        else:
-            total_score -= 1  # Assign a negative score if similarity is below the threshold
-        
-        # Display the updated score
-        st.write(f"Total Score: {total_score}")
-        st.write(f"Emotion score :{emotion_scores}")
-        attended_questions += 1
-        
-        # Check if user says "thank you" to end the chat
-        if "thank you" in query:
-            break
+        if(attended_questions<4):
+            st.markdown(f'<div style="padding: 5px; background-color: #e0e0e0; text-align: left; margin-left: 0; margin-right: auto;"><strong>Bot:</strong> {question}</div>', unsafe_allow_html=True)
+            speak(question)
+            
+            # Get user's answer
+            query = takeCommand().lower()
+            user_answer = query
+            
+            # Review user's answer against dataset
+            review, similarity = review_answer(user_answer, expected_answers, attended_questions)
+            #st.write(f"Review: {review}, Similarity: {similarity}")
+            
+            # Update total score based on the review
+            if t1<=similarity < t2:
+                total_score += 1
+            elif similarity > t2:
+                total_score+=2
+                # Assign a positive score if similarity is above the threshold
+            else:
+                total_score -= 1  # Assign a negative score if similarity is below the threshold
+            
+            # Display the updated score
+            # st.write(f"Total Score: {total_score}")
+            # st.write(f"Emotion score :{emotion_scores}")
+            attended_questions += 1
+            
+            # Check if user says "thank you" to end the chat
+            if "thank you" in query:
+                break
     total_score-2
+    total_questions=total_questions-2
     # Display total score in big font at the end
-    st.title(f"Total Score: {total_score}/{attended_questions}")
+    st.title(f"Total Score: {total_score}")
     st.write(f"Out of {total_questions} questions attended.")
 
     feedback = generate_feedback(total_score, total_questions)
     st.write("Feedback from AI:", feedback)
     
     # Generate and download the PDF
+    # Generate and download the PDF
     pdf_path = generate_pdf(feedback)
-    st.markdown(f"### [Download Feedback as PDF]({pdf_path})", unsafe_allow_html=True)
+
+    # Display a clickable link to download the PDF
+    st.markdown(f'<a href="{pdf_path}" download="interview_feedback.pdf">Click here to download PDF</a>', unsafe_allow_html=True)
+
     
     # Generate and download the PDF
     
@@ -298,7 +304,7 @@ def generate_feedback(total_score, total_questions):
     if total_questions == 0:
         return "No questions were asked. Unable to provide feedback."
     
-    percentage_score = (total_score / (total_questions * 10)) * 100
+    percentage_score = (total_score / total_questions) * 100
     
     if percentage_score >= 80:
         return "You performed exceptionally well! Congratulations!"
@@ -310,7 +316,7 @@ def generate_feedback(total_score, total_questions):
         return "Your performance was below expectations. Focus on improving your skills."
 def get_technical_questions():
     # Define the path to the text file containing technical interview questions
-    file_path = r'C:\Users\ASUS\Desktop\krishna\MAjor-Project\interview_questions.txt'
+    file_path = r'C:\Users\rohit\OneDrive\Desktop\Krishna\krishna\MAjor-Project\pages\interview_questions.txt'
     try:
         with open(file_path, 'r') as file:
             questions = file.readlines()
@@ -369,7 +375,7 @@ async def main():
     st.title("Interview Preparation Coach")
     if st.button("Start Interview"):
         # Run the interview and camera feed concurrently using asyncio.gather()
-        await asyncio.gather(start_interview(), camera_feed())
+        await asyncio.gather(camera_feed(),start_interview())
 uninitialize_engine(engine)
 if __name__ == '__main__':
     asyncio.run(main())
