@@ -1,9 +1,10 @@
 import streamlit as st
 import pyttsx3
 import speech_recognition as sr
-from textblob import TextBlob
 import openai
 import cv2
+from bs4 import BeautifulSoup
+import requests
 import numpy as np
 import os
 from reportlab.lib.pagesizes import letter
@@ -12,6 +13,12 @@ from keras.models import load_model
 import asyncio
 from difflib import SequenceMatcher  # Import SequenceMatcher for string similarity comparison
 import comtypes.client
+
+TOPIC_URLS = {
+    "Data Structures": "https://www.geeksforgeeks.org/commonly-asked-data-structure-interview-questions-set-1/",
+    "Logic System Design": "https://www.geeksforgeeks.org/top-10-system-design-interview-questions-and-answers/",
+    "Object-Oriented Programming": "https://www.geeksforgeeks.org/oops-interview-questions/"
+}
 
 emotion_scores = {
     "Angry": 1,
@@ -40,7 +47,7 @@ def generate_pdf(feedback):
     # Get the directory path where the script is located
     script_dir = os.path.dirname(__file__)
     # Define the path to save the PDF
-    pdf_path = os.path.join(script_dir, r"C:\Users\rohit\OneDrive\Desktop\Krishna\krishna\MAjor-Project\pages\interview_feedback.pdf")
+    pdf_path = os.path.join(script_dir, r"C:\Users\RIZWAN AT\OneDrive\Desktop\krishna\MAjor-Project\pages\interview_feedback.pdf")
     
     # Create a PDF document
     c = canvas.Canvas(pdf_path, pagesize=letter)
@@ -61,9 +68,6 @@ def uninitialize_engine(engine):
         comtypes.client.CoUninitialize()
     except Exception as e:
         print("Error uninitializing COM library:", e)
-
-# Initialize engine
-engine = initialize_engine()
 
 api_data = "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"
 openai.api_key = api_data
@@ -111,25 +115,6 @@ def Reply(question, chat_history=None, total_score=0):
     
     return answer, score, chat_history + [{"user": question, "bot": answer}], total_score
 
-def calculate_score(answer):
-    # Perform sentiment analysis on the answer
-    blob = TextBlob(answer)
-    sentiment_score = blob.sentiment.polarity
-
-    # Assign score based on sentiment
-    if sentiment_score > 0.5:
-        score = 2  # Excellent
-    elif sentiment_score > 0:
-        score = 1  # Good
-    elif sentiment_score == 0:
-        score = 0  # Neutral
-    elif sentiment_score < -0.5:
-        score = -2  # Very Poor
-    else:
-        score = -1  # Poor
-    
-    return score
-
 def takeCommand():
     r = sr.Recognizer()
     with sr.Microphone() as source:
@@ -151,7 +136,7 @@ def detect_emotion(face):
     gray_face = cv2.cvtColor(face, cv2.COLOR_BGR2GRAY)
 
     # Load pre-trained emotion detection model
-    emotion_model = load_model(r'C:\Users\acer\Desktop\krishna\MAjor-Project\model_file_30epochs.h5')
+    emotion_model = load_model(r'C:\Users\RIZWAN AT\OneDrive\Desktop\krishna\MAjor-Project\model_file_30epochs.h5')
 
     # Resize and normalize the grayscale image for emotion detection
     face_resized = cv2.resize(gray_face, (48, 48))
@@ -173,18 +158,13 @@ def detect_emotion(face):
     return dominant_emotion, emotion_score
     return dominant_emotion
 
-def load_expected_answers():
-    dataset_path = r'C:\Users\acer\Desktop\krishna\MAjor-Project\expected_answers.txt'
-    try:
-        with open(dataset_path, 'r') as file:
-            expected_answers = file.readlines()
-        return [answer.strip() for answer in expected_answers]
-    except FileNotFoundError:
-        st.write(f"Failed to open file: {dataset_path}. File not found.")
-        return []
-    except Exception as e:
-        st.write(f"Error occurred while opening file: {dataset_path}. {e}")
-        return []
+def load_expected_answers(url):
+    page = requests.get(url)
+    soup = BeautifulSoup(page.content, 'html.parser')
+    answers = []
+    paragraphs = soup.find_all('p')
+    answers = [paragraph.text for paragraph in paragraphs[2:]]  # Skip the first two paragraphs
+    return answers
     
 def review_answer(user_answer, expected_answers, attended_questions):
     max_similarity = 0
@@ -228,22 +208,77 @@ def calculate_similarity(answer1, answer2):
     similarity_score = 1 - (dp[m][n] / max(m, n))
     return similarity_score
 
-def start_interview_and_camera_feed():
-    st.write("Starting the interview...")
-    speak("Starting the interview...")
-    questions = get_technical_questions()
+async def start_interview():
+    # Interview preparation
+    selected_topic = st.selectbox("Select Interview Topic", list(TOPIC_URLS.keys()))
+    topic_url = TOPIC_URLS[selected_topic]
+    questions = get_technical_questions(topic_url)
+    expected_answers = load_expected_answers(topic_url)
+    
+    # Interview loop
     chat_history = []
-    total_score = 1
-    total_questions = len(questions)
-    attended_questions = 0
+    total_score = 0
+    for question in questions:
+        st.markdown(f'<div style="padding: 5px; background-color: #e0e0e0; text-align: left; margin-left: 0; margin-right: auto;"><strong>Bot:</strong> {question}</div>', unsafe_allow_html=True)
+        speak(question)
+        
+        user_answer = takeCommand().lower()
+        
+        # Review user's answer against dataset
+        review, similarity = review_answer(user_answer, expected_answers, len(chat_history) + 1)
+        
+        # Update total score based on the review
+        if similarity >= 0.6:
+            total_score += 1
+        elif similarity < 0.4:
+            total_score -= 1
+        
+        # Print the score, similarity index, and review of the answer
+        st.write(f"Question: {question}")
+        st.write(f"Score: {total_score}")
+        st.write(f"Similarity: {total_score}")
+        st.write(f"Review: {review}")
+        
+        # Add user's question-answer pair to chat history
+        chat_history.append({"user": question, "bot": review})
+        
+        # Check if user says "thank you" to end the chat
+        if "thank you" in user_answer:
+            break
     
-    # Load the dataset containing expected answers
-    expected_answers = load_expected_answers()
+    # Generate feedback
+    total_score = max(0, total_score)  # Ensure total_score is non-negative
+    feedback = generate_feedback(total_score, len(questions))
+    st.write("Feedback from AI:", feedback)
     
-    # Define threshold similarity score
-    t1 = 0.4
-    t2 = 0.6
+    # Generate and download the PDF
+    pdf_path = generate_pdf(feedback)
+    st.markdown(f'<a href="{pdf_path}" download="interview_feedback.pdf">Click here to download PDF</a>', unsafe_allow_html=True)
+
+def generate_feedback(total_score, total_questions):
+    if total_questions == 0:
+        return "No questions were asked. Unable to provide feedback."
     
+    percentage_score = (total_score / total_questions) * 100
+    
+    if percentage_score >= 80:
+        return "You performed exceptionally well! Congratulations!"
+    elif percentage_score >= 60:
+        return "You performed above average. Keep up the good work!"
+    elif percentage_score >= 40:
+        return "Your performance was average. Try to improve in areas of weakness."
+    else:
+        return "Your performance was below expectations. Focus on improving your skills."
+
+def get_technical_questions(url):
+    page = requests.get(url)
+    soup = BeautifulSoup(page.content, 'html.parser')
+    questions = []
+    for heading in soup.find_all('h3'):
+        questions.append(heading.text)
+    return questions
+
+async def camera_feed():
     # Display the camera feed in the sidebar
     st.sidebar.title("Camera Feed")
     video_feed = st.sidebar.empty()
@@ -276,34 +311,7 @@ def start_interview_and_camera_feed():
 
         # Display the frame in the sidebar
         video_feed.image(frame, channels="BGR")
-        # Continue with the interview process
-        for question in questions:
-            if attended_questions < 4:
-                st.markdown(f'<div style="padding: 5px; background-color: #e0e0e0; text-align: left; margin-left: 0; margin-right: auto;"><strong>Bot:</strong> {question}</div>', unsafe_allow_html=True)
-                speak(question)
-                
-                # Get user's answer
-                query = takeCommand().lower()
-                user_answer = query
-                
-                # Review user's answer against dataset
-                review, similarity = review_answer(user_answer, expected_answers, attended_questions)
-                #st.write(f"Review: {review}, Similarity: {similarity}")
-                
-                # Update total score based on the review
-                if t1 <= similarity < t2:
-                    total_score += 1
-                elif similarity > t2:
-                    total_score += 2
-                    # Assign a positive score if similarity is above the threshold
-                else:
-                    total_score -= 1  # Assign a negative score if similarity is below the threshold
-                
-                attended_questions += 1
-                
-                # Check if user says "thank you" to end the chat
-                if "thank you" in query:
-                    break
+
         # Check for a stop event
         if st.session_state.stop_camera:
             break
@@ -311,62 +319,12 @@ def start_interview_and_camera_feed():
     # Release the camera and close OpenCV window
     video_capture.release()
     cv2.destroyAllWindows()
-    
-    
-                
-    total_score -= 2
-    total_questions -= 2
-    
-    # Display total score
-    st.title(f"Total Score: {total_score}")
-    st.write(f"Out of {total_questions} questions attended.")
 
-    feedback = generate_feedback(total_score, total_questions)
-    st.write("Feedback from AI:", feedback)
-    
-    # Generate and download the PDF
-    pdf_path = generate_pdf(feedback)
-    st.markdown(f'<a href="{pdf_path}" download="interview_feedback.pdf">Click here to download PDF</a>', unsafe_allow_html=True)
-
-    # Ask for feedback
-    st.write("Please provide your feedback on the interview:")
-    user_feedback = st.text_area("Feedback")
-    st.write("Thank you for your feedback!")
-
-def generate_feedback(total_score, total_questions):
-    if total_questions == 0:
-        return "No questions were asked. Unable to provide feedback."
-    
-    percentage_score = (total_score / total_questions) * 100
-    
-    if percentage_score >= 80:
-        return "You performed exceptionally well! Congratulations!"
-    elif percentage_score >= 60:
-        return "You performed above average. Keep up the good work!"
-    elif percentage_score >= 40:
-        return "Your performance was average. Try to improve in areas of weakness."
-    else:
-        return "Your performance was below expectations. Focus on improving your skills."
-
-def get_technical_questions():
-    # Define the path to the text file containing technical interview questions
-    file_path = r'C:\Users\acer\Desktop\krishna\MAjor-Project\interview_questions.txt'
-    try:
-        with open(file_path, 'r') as file:
-            questions = file.readlines()
-        return [question.strip() for question in questions]
-    except FileNotFoundError:
-        st.write(f"Failed to open file: {file_path}. File not found.")
-        return []
-    except Exception as e:
-        st.write(f"Error occurred while opening file: {file_path}. {e}")
-        return []
-
-def main():
+async def main():
     st.title("Interview Preparation Coach")
     if st.button("Start Interview"):
         # Run the interview and camera feed concurrently using asyncio.gather()
-        start_interview_and_camera_feed()
+        await asyncio.gather(start_interview(), camera_feed())
 
 if __name__ == '__main__':
-    main()
+    asyncio.run(main())
